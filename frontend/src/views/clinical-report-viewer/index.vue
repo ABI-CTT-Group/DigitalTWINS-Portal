@@ -48,9 +48,9 @@
             <!-- <canvas ref="pdfCanvasRef" class="mx-auto"></canvas> -->
             <div ref="divCanvasContainer" class="pdf-page"></div>
           </div>
-          
+
         </v-dialog>
-        
+
     </div>
 </template>
 
@@ -73,9 +73,9 @@ const assays = ref<any[]>([])
 
 onMounted(async () => {
   const assayId = route.query.assayId as string;
-  if (assayId === "9"){
+  if (assayId === "9" || assayId === "24"){
     showVisualisationBtn.value = true
-    assays.value = [ 
+    assays.value = [
       {
         id: 'sub-4',
         date: '18/03/2025',
@@ -99,12 +99,12 @@ onMounted(async () => {
       }
     ]
   }
-  
+
   const details = await useClinicalReportViewerDetails(assayId);
   // details.map((item:IClinicalReportViewerDetail, idx: number) => {
   //   assays.value[idx].id = item.uuid;
   //   assays.value[idx].date = item.date;
-  // });  
+  // });
 });
 
 const renderPDF = async (pdfPath:string) => {
@@ -116,7 +116,7 @@ const renderPDF = async (pdfPath:string) => {
       const pdfDocument = await loadingTask.promise;
 
       const totalPages = pdfDocument.numPages; // get total pages
-      divCanvasContainer.value!.innerHTML = ''; 
+      divCanvasContainer.value!.innerHTML = '';
 
       for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
         const page = await pdfDocument.getPage(pageNum);
@@ -207,11 +207,11 @@ const handleDialogCancel = () => {
 
 <style scoped>
 .container{
-  background: #556270;  
-  background: -webkit-linear-gradient(to right, #FF6B6B, #556270);  
-  background: linear-gradient(to right, #FF6B6B, #556270); 
+  background: #556270;
+  background: -webkit-linear-gradient(to right, #FF6B6B, #556270);
+  background: linear-gradient(to right, #FF6B6B, #556270);
 }
-.text-warp{ 
+.text-warp{
   word-wrap: break-word;
   word-break: break-word;
 }
