@@ -12,3 +12,4 @@ scikit-image
 psycopg2
 requests
 python-irodsclient
+digitaltwins
