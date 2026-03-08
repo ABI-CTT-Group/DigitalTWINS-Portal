@@ -2,6 +2,30 @@ import Keycloak from 'keycloak-js';
 
 // Keycloak instance
 let keycloakInstance: Keycloak.Keycloak | null = null;
+const POST_LOGOUT_REDIRECT_KEY = 'post_logout_redirect';
+
+function normalizeRedirectPath(path: string | null | undefined): string {
+  if (!path || typeof path !== 'string') return '/home';
+  const trimmed = path.trim();
+  if (!trimmed.startsWith('/')) return '/home';
+  if (trimmed.startsWith('//')) return '/home';
+  return trimmed;
+}
+
+export function getPostLogoutRedirectPath(): string {
+  return normalizeRedirectPath(sessionStorage.getItem(POST_LOGOUT_REDIRECT_KEY));
+}
+
+export function consumePostLogoutRedirectPath(): string {
+  const target = getPostLogoutRedirectPath();
+  sessionStorage.removeItem(POST_LOGOUT_REDIRECT_KEY);
+  return target;
+}
+
+function saveCurrentPathForNextLogin(): void {
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  sessionStorage.setItem(POST_LOGOUT_REDIRECT_KEY, normalizeRedirectPath(currentPath));
+}
 
 /**
  * Initialize Keycloak
@@ -12,17 +36,16 @@ export async function initKeycloak(): Promise<Keycloak.Keycloak> {
   }
 
   const keycloak = new Keycloak({
-    url: import.meta.env.VITE_KEYCLOAK_URL || 'https://130.216.216.243:8009/',
+    url: import.meta.env.VITE_KEYCLOAK_URL || 'http://130.216.216.116:8009/',
     realm: import.meta.env.VITE_KEYCLOAK_REALM || 'digitaltwins',
     clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'portal-frontend',
   });
-  console.log(keycloak)
+
   try {
     const authenticated = await keycloak.init({
-      //nLoad: 'check-sso',
-      //silentCheckSsoRedirectUri: `${window.location.origin}/silent-check-sso.html`,
-      //pkceMethod: 'S256',
-      checkLoginIframe: false, // Disable to avoid insecure context error on HTTP deployments
+      onLoad: 'check-sso',
+      pkceMethod: 'S256',
+      checkLoginIframe: false,
     });
 
     keycloakInstance = keycloak;
@@ -106,6 +129,7 @@ export function getUserInfo() {
 export async function logout(): Promise<void> {
   if (keycloakInstance) {
     try {
+      saveCurrentPathForNextLogin();
       await keycloakInstance.logout({
         redirectUri: `${window.location.origin}/`,
       });

@@ -96,7 +96,6 @@ const userRoles = computed(() => authStore.userRoles);
 const handleLogout = async () => {
     try {
         await authStore.logout();
-        await router.push({ name: 'Login' });
     } catch (error) {
         console.error('Logout error:', error);
     }
