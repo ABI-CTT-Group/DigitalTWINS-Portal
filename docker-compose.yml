@@ -98,6 +98,7 @@ services:
     volumes:
       - hapi_fhir_postgres:/var/lib/postgresql/data
 
+## define this in the including docker-compose
 #networks:
 #  digitaltwins:
 #    driver: bridge
