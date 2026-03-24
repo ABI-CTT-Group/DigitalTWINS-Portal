@@ -30,6 +30,12 @@ services:
       - plugin_database:/data
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     networks:
       - digitaltwins
     depends_on:
@@ -46,11 +52,17 @@ services:
       - BACKEND_PORT=${BACKEND_PORT:-8000}
       - SSL=${SSL:-false}
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:80" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     networks:
       - digitaltwins
     depends_on:
       - portal-backend
-  
+
   minio:
     image: quay.io/minio/minio:latest
     ports:
@@ -66,7 +78,7 @@ services:
       - MINIO_SERVER_ACCESS_KEY=${MINIO_SERVER_ACCESS_KEY:-minioadmin}
       - MINIO_SERVER_SECRET_KEY=${MINIO_SERVER_SECRET_KEY:-minioadmin}
     command: server /data --console-address ":9001" --address ":9000"
-  
+
   hapi-fhir:
     image: hapiproject/hapi:latest
     restart: on-failure
