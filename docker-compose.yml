@@ -28,7 +28,7 @@ services:
       - ./backend/datasets_workflow:/datasets_workflow
       - ./backend/configs.ini:/app/configs.ini
       - plugin_database:/data
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     restart: unless-stopped
     networks:
       - digitaltwins
