@@ -3,6 +3,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    container_name: portal-backend
     ports:
       - "${PORTAL_BACKEND_BIND_ADDRESS:-0.0.0.0}:8000:8000"
     environment:
@@ -39,6 +40,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    container_name: portal-frontend
     ports:
       - "8080:80"
       - "8443:443"
