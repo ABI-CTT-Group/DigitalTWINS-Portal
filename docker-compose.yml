@@ -4,7 +4,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "${PORTAL_BACKEND_BIND_ADDRESS:-0.0.0.0}:8000:8000"
     environment:
       - PYTHONPATH=/app
       - DATABASE_PATH=/data/plugin_registry.db
@@ -36,7 +36,7 @@ services:
       - ./backend/datasets_workflow:/datasets_workflow
       - ./backend/configs.ini:/app/configs.ini
       - plugin_database:/data
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - nginx_plugin_configs:/nginx-plugins-conf
     restart: unless-stopped
     healthcheck:
@@ -60,17 +60,18 @@ services:
         - VITE_KEYCLOAK_CLIENT_ID=portal-frontend
     container_name: digitaltwins-platform-portal-frontend
     ports:
-      - "80:80"
-      - "443:443"
+      - "${PORTAL_FRONTEND_BIND_ADDRESS:-0.0.0.0}:80:80"
+      - "${PORTAL_FRONTEND_BIND_ADDRESS:-0.0.0.0}:443:443"
     environment:
-      - BACKEND_PORT=${BACKEND_PORT:-8000}
       - PORTAL_BACKEND_HOST=${PORTAL_BACKEND_HOST:-localhost}
+      - SSL=${SSL:-false}
     volumes:
       - nginx_plugin_configs:/etc/nginx/conf.d/plugins
-      - ${SSL_CERT_DIR:-./certs}:/etc/nginx/certs:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${SSL_CERT_DIR:-./certs}:/etc/nginx/certs:ro  # Mount your certificates (Read-Only)
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:80" ]
+      test: [ "CMD", "curl", "-fkL", "http://localhost:80" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -78,10 +79,17 @@ services:
     networks:
       - digitaltwins
     depends_on:
-      - portal-backend
+      portal-backend:
+        condition: service_started
+      # Wait for the airflow-apiserver to come up to avoid emerg messages for nginx
+      #airflow-apiserver:
+      #  condition: service_healthy
   
   minio:
     image: quay.io/minio/minio:latest
+    ports:
+      - '${MINIO_BIND_ADDRESS:-0.0.0.0}:8004:9000' #backend
+      - '${MINIO_BIND_ADDRESS:-0.0.0.0}:8007:9001' #frontend
     networks:
       - digitaltwins
     volumes:
@@ -113,6 +121,8 @@ services:
   hapi-fhir-postgres:
     image: postgres:13-alpine
     restart: always
+#    ports:
+#      - "${HAPI_FHIR_BIND_ADDRESS:-0.0.0.0}:8006:8080"
     networks:
       - digitaltwins
     environment:
@@ -147,10 +157,10 @@ services:
       echo 'Buckets created and policies applied successfully.';
       "
 
-networks:
-  digitaltwins:
-    driver: bridge
-    name: digitaltwins
+#networks:
+#  digitaltwins:
+#    driver: bridge
+#    name: digitaltwins
 
 volumes:
   portal_datasets:
