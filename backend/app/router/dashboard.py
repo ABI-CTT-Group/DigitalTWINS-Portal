@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Query, HTTPException, Depends
+import asyncio
+from fastapi import APIRouter, Query, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from app.models import assay_model
 import json
@@ -31,12 +32,9 @@ async def get_token(authorization: str = Header(None)):
     return token
 
 
-async def get_client(token: str = Depends(get_token)):
-    client = DigitalTWINSAPIClient(token=token)
-    try:
-        yield client
-    finally:
-        await client.close()
+async def get_client(request: Request, token: str = Depends(get_token)):
+    client = DigitalTWINSAPIClient(token=token, http_client=request.app.state.http_client)
+    yield client
 
 
 router = APIRouter(prefix="/api/dashboard")
@@ -129,12 +127,11 @@ async def get_dashboard_category_children_by_uuid(
 
         raise HTTPException(status_code=500, detail=str(e))
 
-    children = []
-    for data in dependencies:
-        try:
-            obj_type = data.get("type")
-            obj_id = data.get("id")
+    async def fetch_child(data):
+        obj_type = data.get("type")
+        obj_id = data.get("id")
 
+        try:
             if obj_type == "projects":
                 res = await client.get(f"/projects/{obj_id}")
                 child = res.json().get('project')
@@ -148,13 +145,12 @@ async def get_dashboard_category_children_by_uuid(
                 res = await client.get(f"/assays/{obj_id}")
                 child = res.json().get('assay')
             else:
-                continue
+                return None
 
             send_category = child.get("type", None)
-            print(send_category)
 
             if send_category == "assays":
-                temp = {
+                return {
                     "seekId": child.get("id", None),
                     "name": child.get("attributes").get("title", None),
                     "tag": child.get("attributes").get("tags")[0] if child.get("attributes").get("tags", None) is not None else None,
@@ -163,19 +159,20 @@ async def get_dashboard_category_children_by_uuid(
                     "description": child.get("attributes").get("description", None),
                 }
             else:
-                temp = {
+                return {
                     "seekId": child.get("id", None),
                     "name": child.get("attributes").get("title", None),
                     "category": send_category.capitalize() if send_category else None,
                     "description": child.get("attributes").get("description", None),
                 }
-            children.append(temp)
 
         except HTTPStatusError as e:
             raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
         except RequestError as e:
             raise HTTPException(status_code=500, detail=str(e))
-    return children
+
+    results = await asyncio.gather(*[fetch_child(data) for data in dependencies])
+    return [r for r in results if r is not None]
 
 
 @router.get("/assays/{assay_seek_id}")

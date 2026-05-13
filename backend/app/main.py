@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 import io
+import httpx
 from app.router import dashboard, clinical_report_viewer, workflow_tool_plugin, workflow_router
 from contextlib import asynccontextmanager
 from app.database.database import init_db
@@ -28,11 +29,14 @@ async def lifespan(app: FastAPI):
     # Startup
     load_dotenv()
     init_db()
+    # Shared HTTP client — one connection pool reused across all requests
+    # rather than opening a new TCP connection per request.
+    app.state.http_client = httpx.AsyncClient()
     print("starting lifespan")
     yield
     # Shutdown
+    await app.state.http_client.aclose()
     print("ending lifespan")
-    pass
 
 app = FastAPI(title="DigitalTWINS Portal API", verison="1.0.0", lifespan=lifespan)
 app.include_router(dashboard.router)

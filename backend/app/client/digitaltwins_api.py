@@ -14,6 +14,7 @@ class DigitalTWINSAPIClient:
         username: Optional[str] = None,
         password: Optional[str] = None,
         token: Optional[str] = None,
+        http_client: Optional[httpx.AsyncClient] = None,
     ):
         _url = os.getenv('DIGITALTWINS_API_BASE_URL', "http://localhost").rstrip('/')
         _port = os.getenv('DIGITALTWINS_API_PORT', '8000')
@@ -21,7 +22,11 @@ class DigitalTWINSAPIClient:
         self.username = username
         self.password = password
         self.token = token
-        self.client = httpx.AsyncClient()
+        # Use the shared client if provided; otherwise create a standalone one.
+        # The shared client (passed from app.state) maintains a connection pool
+        # across requests, avoiding per-request TCP handshake overhead.
+        self._owns_client = http_client is None
+        self.client = http_client if http_client is not None else httpx.AsyncClient()
 
     def _get_auth_headers(self) -> Dict[str, str]:
         headers = {}
@@ -62,4 +67,7 @@ class DigitalTWINSAPIClient:
         return await self.request("POST", endpoint, json=json)
 
     async def close(self):
-        await self.client.aclose()
+        # Only close the underlying client if we created it ourselves.
+        # Shared clients (from app.state) are managed by the app lifespan.
+        if self._owns_client:
+            await self.client.aclose()

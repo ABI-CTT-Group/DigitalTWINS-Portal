@@ -327,8 +327,8 @@ watch(()=>currentCategoryData.value, (newVal)=>{
         assayExecute.value = {};
         allAssayDetailsOfStudy.value = {};
 
-        const loadSequentially = async () => {
-            for (const item of currentCategoryData.value) {
+        const loadAssayDetails = async () => {
+            await Promise.all(currentCategoryData.value.map(async (item) => {
                 const details = await useDashboardGetAssayConfigDetails(item.seekId);
                 setAssayExecute(item.seekId, "Launch", "");
                 if (details) {
@@ -345,9 +345,9 @@ watch(()=>currentCategoryData.value, (newVal)=>{
                         isAssayReadyToLaunch: false,
                     });
                 }
-            }
+            }));
         };
-        loadSequentially();
+        loadAssayDetails();
     }
 })
 
