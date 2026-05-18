@@ -4,7 +4,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "${PORTAL_BACKEND_BIND_ADDRESS:-0.0.0.0}:8000:8000"
+      - "${PORTAL_BACKEND_BIND_ADDRESS:-0.0.0.0}:${PORTAL_BACKEND_PORT:-8000}:8000"
     environment:
       - PYTHONPATH=/app
       - DATABASE_PATH=/data/plugin_registry.db
@@ -18,7 +18,7 @@ services:
       - USE_SSL=${USE_SSL:-false}
       - FHIR_ENDPOINT=${FHIR_ENDPOINT:-hapi-fhir:8080/fhir}
       - DIGITALTWINS_API_BASE_URL=${DIGITALTWINS_API_BASE_URL:-http://digitaltwins-api}
-      - DIGITALTWINS_API_PORT=${DIGITALTWINS_API_PORT:-8000}
+      - DIGITALTWINS_API_PORT=8000
       - PORTAL_BACKEND_HOST=${PORTAL_BACKEND_HOST:-localhost}
       - PORTAL_KEYCLOAK_BASE_URL=${PORTAL_KEYCLOAK_BASE_URL:-https://130.216.216.243:8009}
       - KEYCLOAK_REALM=${KEYCLOAK_REALM:-digitaltwins}
@@ -62,6 +62,7 @@ services:
     ports:
       - "${PORTAL_FRONTEND_BIND_ADDRESS:-0.0.0.0}:80:80"
       - "${PORTAL_FRONTEND_BIND_ADDRESS:-0.0.0.0}:443:443"
+      - "${PORTAL_FRONTEND_BIND_ADDRESS:-0.0.0.0}:8443:8443"
     environment:
       - PORTAL_BACKEND_HOST=${PORTAL_BACKEND_HOST:-localhost}
       - SSL=${SSL:-false}
