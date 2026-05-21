@@ -32,3 +32,4 @@ test
 ts
 
 /public/runtime-config.json
+config.js

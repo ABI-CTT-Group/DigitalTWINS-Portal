@@ -1,0 +1,5 @@
+window.RUNTIME_CONFIG = {
+  keycloakUrl: 'https://${PLATFORM_DOMAIN}/auth',
+  keycloakRealm: 'digitaltwins',
+  keycloakClientId: 'portal-frontend',
+};

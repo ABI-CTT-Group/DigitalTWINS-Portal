@@ -1,5 +1,17 @@
 import Keycloak from 'keycloak-js';
 
+// Runtime config — injected via /config.js at container startup (see config.js.template).
+// Falls back to build-time VITE_ env vars for local development.
+declare global {
+  interface Window {
+    RUNTIME_CONFIG?: {
+      keycloakUrl?: string;
+      keycloakRealm?: string;
+      keycloakClientId?: string;
+    };
+  }
+}
+
 // Keycloak instance
 let keycloakInstance: Keycloak.Keycloak | null = null;
 
@@ -11,9 +23,9 @@ export async function initKeycloak(): Promise<Keycloak.Keycloak> {
     return keycloakInstance;
   }
   const keycloak = new Keycloak({
-    url: import.meta.env.VITE_KEYCLOAK_URL,
-    realm: import.meta.env.VITE_KEYCLOAK_REALM,
-    clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID,
+    url: window.RUNTIME_CONFIG?.keycloakUrl ?? import.meta.env.VITE_KEYCLOAK_URL,
+    realm: window.RUNTIME_CONFIG?.keycloakRealm ?? import.meta.env.VITE_KEYCLOAK_REALM,
+    clientId: window.RUNTIME_CONFIG?.keycloakClientId ?? import.meta.env.VITE_KEYCLOAK_CLIENT_ID,
   });
   console.log(keycloak)
   try {
