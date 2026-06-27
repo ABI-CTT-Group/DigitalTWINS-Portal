@@ -8,9 +8,9 @@ services:
     environment:
       - PYTHONPATH=/app
       - DATABASE_PATH=/data/plugin_registry.db
-      - DATASET_DIR_TOOL=/datasets_tool
-      - DATASET_DIR_MEASUREMENT=/datasets_measurement
-      - DATASET_DIR_WORKFLOW=/datasets_workflow
+      - DATASET_DIR_TOOL=/portal_workspace/tool
+      - DATASET_DIR_MEASUREMENT=/portal_workspace/measurement
+      - DATASET_DIR_WORKFLOW=/portal_workspace/workflow
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
       - MINIO_ACCESS_KEY=${MINIO_SERVER_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SERVER_SECRET_KEY:-minioadmin}
@@ -29,16 +29,30 @@ services:
       # Nginx plugin config (shared volume with portal-frontend)
       - NGINX_PLUGINS_CONF_DIR=/nginx-plugins-conf
       - NGINX_CONTAINER_NAME=digitaltwins-platform-portal-frontend
+      # Upload ceiling — read by /api/measurement and surfaced to nginx +
+      # the frontend dropzone via /api/measurement/config so all three
+      # layers move together when an operator edits .env and restarts.
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-20480}
     volumes:
       - portal_datasets:/app/data
-      - ./backend/datasets_tool:/datasets_tool
-      - ./backend/datasets_measurement:/datasets_measurement
-      - ./backend/datasets_workflow:/datasets_workflow
-      - ./backend/configs.ini:/app/configs.ini
+      # /portal_workspace holds tool + workflow + measurement staging in
+      # three subdirs (tool/, workflow/, measurement/), keyed off the
+      # DATASET_DIR_* env vars above. It was a Windows host bind mount, but
+      # Docker Desktop's gRPC-FUSE hangs under SPARC dataset creation for
+      # large plugins (thousands of small files — VolView/itk pipelines).
+      # Switched to a named volume so SPARC writes stay inside the Linux VM's
+      # ext4. The source of truth for datasets is MinIO; the local copy here
+      # is just build staging + cleanup target on plugin/workflow delete.
+      # NOTE: measurement/ is no longer host-bind-mounted, so dropping SPARC
+      # test datasets from Windows now needs `docker cp` into the volume.
+      - portal_workspace:/portal_workspace
       - plugin_database:/data
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - nginx_plugin_configs:/nginx-plugins-conf
     restart: unless-stopped
+    # Give the lifespan shutdown hook time to batch-kill all plugin backends
+    # before Docker SIGKILLs portal-backend itself.
+    stop_grace_period: 60s
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000" ]
       interval: 30s
@@ -66,6 +80,8 @@ services:
     environment:
       - PORTAL_BACKEND_HOST=${PORTAL_BACKEND_HOST:-localhost}
       - SSL=${SSL:-false}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-20480}
+      - MAX_PART_SIZE_MB=${MAX_PART_SIZE_MB:-16}
     volumes:
       - nginx_plugin_configs:/etc/nginx/conf.d/plugins
       - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
@@ -167,6 +183,9 @@ services:
 volumes:
   portal_datasets:
     name: digitaltwins_portal_datasets
+    driver: local
+  portal_workspace:
+    name: digitaltwins_portal_workspace
     driver: local
   hapi_fhir_postgres:
     name: digitaltwins_hapi_fhir_postgres

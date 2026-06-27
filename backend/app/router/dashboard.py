@@ -6,10 +6,9 @@ import json
 from pathlib import Path
 # from sparc_me import Dataset, Sample, Subject
 # from app.utils import digitaltwins_configs
-import shutil
 from pprint import pprint
 import os
-from app.utils.utils import force_rmtree, get_workflow_type
+from app.utils.utils import get_workflow_type
 from app.client.digitaltwins_api import DigitalTWINSAPIClient
 from fastapi import Header, HTTPException
 from httpx import HTTPStatusError, RequestError
@@ -79,7 +78,7 @@ async def get_programmes(client: DigitalTWINSAPIClient = Depends(get_client)):
         #     programmes.append(temp)
         category = data.get("type", None)
         temp = {
-            "seekId": data.get("id", None),
+            "seek_id": data.get("id", None),
             "name": data.get("attributes").get("title", None),
             "category": category.capitalize() if category is not None else None,
             "description": data.get("attributes").get("description", None),
@@ -151,7 +150,7 @@ async def get_dashboard_category_children_by_uuid(
 
             if send_category == "assays":
                 return {
-                    "seekId": child.get("id", None),
+                    "seek_id": child.get("id", None),
                     "name": child.get("attributes").get("title", None),
                     "tag": child.get("attributes").get("tags")[0] if child.get("attributes").get("tags", None) is not None else None,
                     "workflow_seek_id": child.get("relationships").get("workflows")[0][0].get('id') if child.get("relationships").get("workflows", None) is not None else None,
@@ -160,7 +159,7 @@ async def get_dashboard_category_children_by_uuid(
                 }
             else:
                 return {
-                    "seekId": child.get("id", None),
+                    "seek_id": child.get("id", None),
                     "name": child.get("attributes").get("title", None),
                     "category": send_category.capitalize() if send_category else None,
                     "description": child.get("attributes").get("description", None),
@@ -191,11 +190,11 @@ async def get_seek_assay_by_id(
         investigation_data = relationships.get("investigation", {}).get("data")
 
         return {
-            "seekId": assay_res.get("id", None),
+            "seek_id": assay_res.get("id", None),
             "name": assay_res.get("attributes", {}).get("title", None),
             "relationships": {
-                "studySeekId": study_data.get("id") if study_data else None,
-                "investigationSeekId": investigation_data.get("id") if investigation_data else None,
+                "study_seek_id": study_data.get("id") if study_data else None,
+                "investigation_seek_id": investigation_data.get("id") if investigation_data else None,
             }
         }
 
@@ -230,7 +229,7 @@ async def get_dashboard_workflows(client: DigitalTWINSAPIClient = Depends(get_cl
             workflow_type = get_workflow_type(tags)
 
             temp = {
-                "seekId": w_seek_id,
+                "seek_id": w_seek_id,
                 "uuid": "",
                 "name": title,
                 "type": workflow_type,
@@ -263,16 +262,16 @@ async def get_dashboard_workflow_detail_by_uuid(
 
         internals = attributes.get('internals', {})
         inputs = [
-            {"input":{"name": i.get('name', '') if i.get('name') is not None else i.get('id', ''), "category": i.get('description', '')}, "datasetSelectedUUID":"", "sampleSelectedType":""}
+            {"input":{"name": i.get('name', '') if i.get('name') is not None else i.get('id', ''), "category": i.get('description', '')}, "dataset_selected_uuid":"", "sample_selected_type":""}
             for i in internals.get('inputs', [])
         ]
         outputs = [
-            {"output":{"name": i.get('name', '') if i.get('name') is not None else i.get('id', ''), "category": i.get('description', '')}, "datasetName": "New dataset", "sampleName":i.get('name', '') if i.get('name') is not None else i.get('id', '')}
+            {"output":{"name": i.get('name', '') if i.get('name') is not None else i.get('id', ''), "category": i.get('description', '')}, "dataset_name": "New dataset", "sample_name":i.get('name', '') if i.get('name') is not None else i.get('id', '')}
             for i in internals.get('outputs', [])
         ]
 
         return {
-            "seekId": seek_id,
+            "seek_id": seek_id,
             "uuid": "",
             "name": title,
             "inputs": inputs,
@@ -349,21 +348,21 @@ async def get_dashboard_dataset_detail_by_uuid(uuid: str = Query(None), client: 
 async def set_dashboard_assay_details(details: assay_model.AssayDetails, client: DigitalTWINSAPIClient = Depends(get_client)):
     assay_data = {
         "assay_uuid": details.uuid,
-        "assay_seek_id": int(details.seekId),
-        "workflow_seek_id": int(details.workflow.seekId),
-        "cohort": [str(n) for n in details.numberOfParticipants],
-        "ready": details.isAssayReadyToLaunch,
+        "assay_seek_id": int(details.seek_id),
+        "workflow_seek_id": int(details.workflow.seek_id),
+        "cohort": [str(n) for n in details.number_of_participants],
+        "ready": details.is_assay_ready_to_launch,
         "inputs": [
             {"name": i.get("input").get("name"),
              "category": i.get("input").get("category"),
-             "dataset_uuid": i.get("datasetSelectedUUID"),
-             "sample_type": i.get("sampleSelectedType")} for i in details.workflow.inputs
+             "dataset_uuid": i.get("dataset_selected_uuid"),
+             "sample_type": i.get("sample_selected_type")} for i in details.workflow.inputs
         ],
         "outputs": [
             {"name": o.get("output").get("name"),
              "category": o.get("output").get("category"),
-             "dataset_name": o.get("datasetName"),
-             "sample_name": o.get("sampleName")} for o in details.workflow.outputs
+             "dataset_name": o.get("dataset_name"),
+             "sample_name": o.get("sample_name")} for o in details.workflow.outputs
         ]
     }
     try:
@@ -391,30 +390,30 @@ async def get_dashboard_assay_detail_by_uuid(seek_id: str = Query(None),
         if configs is None:
             return None
         details = {
-            "seekId": str(configs.get("assay_seek_id", None)),
+            "seek_id": str(configs.get("assay_seek_id", None)),
             "uuid": str(configs.get("assay_uuid", "")),
             "workflow": {
-                "seekId": str(configs.get("workflow_seek_id", None)),
+                "seek_id": str(configs.get("workflow_seek_id", None)),
                 "uuid": str(configs.get("workflow_uuid", "")),
                 "inputs": [{
                     "input": {
                         "name": i.get("name", None),
                         "category": i.get("category", None),
                     },
-                    "datasetSelectedUUID": i.get("dataset_uuid", None),
-                    "sampleSelectedType": i.get("sample_type", None),
+                    "dataset_selected_uuid": i.get("dataset_uuid", None),
+                    "sample_selected_type": i.get("sample_type", None),
                 } for i in configs.get("inputs", [])],
                 "outputs": [{
                     "output": {
                         "name": o.get("name", None),
                         "category": o.get("category", None),
                     },
-                    "datasetName": o.get("dataset_name", None),
-                    "sampleName": o.get("sample_name", None),
+                    "dataset_name": o.get("dataset_name", None),
+                    "sample_name": o.get("sample_name", None),
                 } for o in configs.get("outputs", [])],
             },
-            "numberOfParticipants": [int(n) for n in (configs.get("cohort") or []) if str(n).isdigit()],
-            "isAssayReadyToLaunch": configs.get("ready", None)
+            "number_of_participants": [int(n) for n in (configs.get("cohort") or []) if str(n).isdigit()],
+            "is_assay_ready_to_launch": configs.get("ready", None)
         }
         return details
 
@@ -560,73 +559,3 @@ async def launch_dashboard_assay_detail_by_uuid(seek_id: str = Query(None), clie
     #             "data": "http://130.216.216.26:8008/lab/tree/ep3/statistical_analysis_of_electrode_measurements.ipynb"
     #         }
     # return None
-
-
-@router.get("/copy_dataset/{name}")
-def copy_dataset(name: str):
-    measurements_path = os.environ.get("DATASET_DIR_MEASUREMENT", "./datasets_measurement")
-    src = Path(measurements_path) / name
-    dst = Path("./data")
-    dst.mkdir(parents=True, exist_ok=True)
-    if not src.exists():
-        raise HTTPException(status_code=404, detail=f"dataset directory {src} does not exist")
-
-    for item in src.iterdir():
-        target = dst / item.name
-
-        if target.exists():
-            if target.is_file():
-                target.unlink()
-            else:
-                shutil.rmtree(target)
-
-        if item.is_dir():
-            shutil.copytree(item, target)
-        else:
-            shutil.copy2(item, target)
-
-    return {
-        "status": "200",
-        "message": "dataset moved successfully"
-    }
-
-
-@router.get("/clear_data")
-def clear_data():
-    dst = Path("./data")
-    force_rmtree(dst, True)
-
-    return {
-        "status": "200",
-        "message": "dataset moved successfully"
-    }
-
-
-def generate_outputs_datasets(target_dataset_path, outputs):
-    if not target_dataset_path.exists():
-        target_dataset_path.mkdir(exist_ok=True, parents=True)
-    for output in outputs:
-        output_dataset_path = target_dataset_path / output.get("dataset_name")
-        if output_dataset_path.exists():
-            continue
-        # dataset.create_empty_dataset(version="2.0.0")
-        # # Save the template dataset.
-        # dataset.save(save_dir=output_dataset_path)
-
-
-def download_inputs_datasets(target_dataset_path):
-    shutil.copytree(root_dir / "data" / "duke_test_data", target_dataset_path)
-
-
-def clear_folder(folder_path):
-    folder = Path(folder_path)
-
-    if folder.exists() and folder.is_dir():
-        for item in folder.iterdir():
-            if item.is_file() or item.is_symlink():
-                item.unlink()
-            elif item.is_dir():
-                clear_folder(item)
-                item.rmdir()
-    else:
-        print(f"path not found: {folder}")

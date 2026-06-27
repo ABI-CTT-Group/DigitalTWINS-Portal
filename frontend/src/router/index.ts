@@ -6,20 +6,21 @@ import {
   RouteRecordRaw,
 } from "vue-router";
 import { useAuthStore } from "@/store/auth_store";
-import { isAuthenticated } from "@/plugins/keycloak";
-import Home from "@/views/dashboard/index.vue";
-import Dashboard from "@/views/dashboard/study-dashboard/index.vue";
-import TutorialDashboard from "@/views/dashboard/tutorial-dashboard/index.vue";
-import CatalogueDashboard from "@/views/dashboard/catalogue-dashboard/index.vue";
-import CatalogueDashboardView from "@/views/dashboard/catalogue-dashboard/catalogue-dashboard-view.vue";
-import ToolsViewer from "@/views/dashboard/catalogue-dashboard/tools-viewer.vue";
+import { isAuthenticated } from "@/bootstrap/keycloak";
+import Home from "@/views/home/index.vue";
+import DashboardView from "@/views/dashboard/DashboardView.vue";
+import TutorialDashboard from "@/views/tutorial/index.vue";
+import CatalogueDashboardView from "@/views/catalogue/catalogue-dashboard-view.vue";
+import ToolsViewer from "@/views/catalogue/tools-viewer.vue";
 import Layout from "@/layouts/Default.vue";
-import LaunchedAssayOverview from "@/views/dashboard/study-dashboard/assay-overview.vue";
+import LaunchedAssayOverview from "@/views/dashboard/report/AssayReportView.vue";
 import UploadDataset from "@/views/upload-dataset/index.vue";
 import UploadToolDataset from "@/views/upload-dataset/workflow-tool/index.vue";
 import UploadWorkflowDataset from "@/views/upload-dataset/workflow/index.vue";
-import PluginHome from "@/views/toolPlugin/index.vue";
-import ToolPluginView from "@/views/toolPlugin/tool-plugin-view.vue";
+import UploadMeasurementsDataset from "@/views/upload-dataset/measurements/index.vue";
+import MeasurementFhirPreview from "@/views/upload-dataset/measurements/MeasurementFhirPreview.vue";
+
+import ToolPluginView from "@/views/tool-plugin/tool-plugin-view.vue";
 
 
 const routes = [
@@ -33,33 +34,32 @@ const routes = [
             component: Home,
           },
           {
-            path: "/dashboard:dashboardType",
-            name: "Dashboard",
-            component: Dashboard,
-            meta: { requiresAuth: true },
+            path: "/study-dashboard",
+            name: "StudyDashboard",
+            component: DashboardView,
+            meta: { requiresAuth: true, requiresRoles: ['admin', 'researcher'], type: 'study' },
+          },
+          {
+            path: "/clinician-dashboard",
+            name: "ClinicianDashboard",
+            component: DashboardView,
+            meta: { requiresAuth: true, requiresRoles: ['admin', 'researcher', 'clinician'], type: 'clinician' },
           },
           {
             path: "/how-it-works",
             name: "TutorialDashboard",
-            component:TutorialDashboard,
-            meta: { requiresAuth: true },
+            component: TutorialDashboard,
           },
           {
             path: "/catalogue-dashboard",
-            component:CatalogueDashboard,
+            name: "CatalogueDashboardView",
+            component: CatalogueDashboardView,
+          },
+          {
+            path: "/catalogue-dashboard-tools",
+            name: "ToolsViewer",
+            component: ToolsViewer,
             meta: { requiresAuth: true },
-            children:[
-              {
-                path: "/catalogue-dashboard",
-                name: "CatalogueDashboardView",
-                component: CatalogueDashboardView,
-              },
-              {
-                path: "/catalogue-dashboard-tools",
-                name: "ToolsViewer",
-                component: ToolsViewer,
-              }
-            ]
           },
           {
             path: "/launched-assay",
@@ -77,20 +77,29 @@ const routes = [
                 path: "/upload-tool-dataset",
                 name: "UploadToolDataset",
                 component: UploadToolDataset,
+                meta: { requiresAuth: true, requiresRoles: ['admin'] },
               },
               {
                 path: "/upload-workflow-dataset",
                 name: "UploadWorkflowDataset",
                 component: UploadWorkflowDataset,
+                meta: { requiresAuth: true, requiresRoles: ['admin'] },
+              },
+              {
+                path: "/upload-dataset/measurements",
+                name: "UploadMeasurementsDataset",
+                component: UploadMeasurementsDataset,
+                meta: { requiresAuth: true, requiresRoles: ['admin', 'researcher'] },
+              },
+              {
+                path: "/upload-dataset/measurements/:id/preview",
+                name: "MeasurementFhirPreview",
+                component: MeasurementFhirPreview,
+                meta: { requiresAuth: true, requiresRoles: ['admin', 'researcher'] },
               },
             ]
           },
-          {
-            path: "/plugin-home",
-            name: "PluginHome",
-            component: PluginHome,
-            meta: { requiresAuth: true },
-          },
+
     ]
   },
   {
@@ -112,44 +121,28 @@ const router = createRouter({
 // Navigation guard for authentication
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore();
-  const requiresAuth = to.meta?.requiresAuth;
+  const requiresAuth = to.matched.some(r => r.meta?.requiresAuth);
+  const requiresRoles = (to.meta?.requiresRoles ?? []) as string[];
   const hasToken = !!sessionStorage.getItem('access_token');
-  // Update auth state in case token was updated
   authStore.updateAuthState();
 
   if (requiresAuth) {
     if (!isAuthenticated() && !hasToken) {
-      // Redirect to login if not authenticated
       console.warn('⚠️ Router Guard: NOT authenticated & no sessionStorage token → redirecting to Home');
       next({ name: 'Home' });
-    } else {
-      if (to.name === 'Dashboard') {
-        const dashboardType = String(to.params?.dashboardType || '');
-
-        if (dashboardType === 'study') {
-          if (!authStore.hasAdminRole && !authStore.hasResearcherRole) {
-            if (authStore.hasClinicianRole) {
-              next({ name: 'Dashboard', params: { dashboardType: 'clinician' } });
-              return;
-            }
-            next({ name: 'Home' });
-            return;
-          }
-        }
-
-        if (dashboardType === 'clinician') {
-          if (!authStore.hasAdminRole && !authStore.hasClinicianRole) {
-            if (authStore.hasResearcherRole) {
-              next({ name: 'Dashboard', params: { dashboardType: 'study' } });
-              return;
-            }
-            next({ name: 'Home' });
-            return;
-          }
-        }
-      }
-      next();
+      return;
     }
+
+    // Role guard — hard block for routes that require a specific role
+    if (requiresRoles.length > 0) {
+      const hasRequiredRole = requiresRoles.some(r => authStore.userRoles.includes(r));
+      if (!hasRequiredRole) {
+        next({ name: 'Home' });
+        return;
+      }
+    }
+
+    next();
   } else {
     next();
   }
