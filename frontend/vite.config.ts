@@ -112,7 +112,17 @@ export default defineConfig({
           /^\/plugin(\/|$)/,
           /^\/tools(\/|$)/,
           /^\/minio-console(\/|$)/,
+          // Keycloak SSO — this deployment mounts it under /auth, so the bare
+          // /realms rule below never matched and the SW hijacked the login
+          // redirect, serving the SPA shell (black screen). Cover /auth and
+          // every other service nginx reverse-proxies.
+          /^\/auth(\/|$)/,
           /^\/realms(\/|$)/,
+          /^\/airflow(\/|$)/,
+          /^\/jupyterhub(\/|$)/,
+          /^\/seek(\/|$)/,
+          /^\/grafana(\/|$)/,
+          /^\/dtapi(\/|$)/,
           /silent-check-sso\.html$/,
           /\/[^/?]+\.[^/]+$/,
         ],
