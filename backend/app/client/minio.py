@@ -14,15 +14,33 @@ class MinioClient:
     """Minio client for storing plugin frontend build artfacts and backend origin codes using boto3"""
 
     def __init__(self, bucket_name):
-        self.endpoint = os.getenv('MINIO_ENDPOINT', "localhost:9000")
+        # MINIO_ENDPOINT may or may not carry a scheme: the portal's compose sets
+        # `minio:9000`, while the shared platform .env sets `http://minio:9000` for
+        # other services. Split the two halves apart and keep both.
+        raw_endpoint = os.getenv('MINIO_ENDPOINT', "localhost:9000").strip()
+        internal_scheme = "http"
+        for _scheme in ("https://", "http://"):
+            if raw_endpoint.startswith(_scheme):
+                internal_scheme = _scheme[:-3]
+                raw_endpoint = raw_endpoint[len(_scheme):]
+                break
+        self.endpoint = raw_endpoint
+
+        # Scheme boto3 uses to reach MinIO. This client only ever talks to MinIO
+        # container-to-container on the docker network, so it must NOT follow the SSL
+        # env var — that one describes the scheme *browsers* reach the portal on.
+        # MinIO serves plain HTTP on 9000 (its command line configures no TLS), so
+        # deriving this from SSL meant switching the portal to HTTPS made every bucket
+        # call attempt a TLS handshake against a plaintext port, and all of them failed.
+        self.internal_scheme = internal_scheme
+
         self.access_key = os.getenv('MINIO_ACCESS_KEY', "minioadmin")
         self.secret_key = os.getenv('MINIO_SECRET_KEY', "minioadmin")
         self.bucket_name = bucket_name
-        self.use_ssl = os.getenv('USE_SSL', "false").lower() == 'true'
 
         self.client = boto3.client(
             's3',
-            endpoint_url=f"http{'s' if self.use_ssl else ''}://{self.endpoint}",
+            endpoint_url=f"{self.internal_scheme}://{self.endpoint}",
             aws_access_key_id=self.access_key,
             aws_secret_access_key=self.secret_key,
             region_name='us-east-1'  # MinIO doesn't require specific region
@@ -184,11 +202,6 @@ class MinioClient:
         except Exception as e:
             logger.error(f"Failed to get presigned URL for object: {object_name}: {e}")
             raise
-
-    def get_public_url(self, object_name: str) -> str:
-        """Get a public URL for an object (no expiration)"""
-        protocol = "https" if self.use_ssl else "http"
-        return f"{protocol}://{self.endpoint}/{self.bucket_name}/{object_name}"
 
     def object_exists(self, object_name: str) -> bool:
         """Check if an object exists"""

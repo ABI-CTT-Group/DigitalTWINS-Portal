@@ -1,37 +1,44 @@
+# Portal nginx. Serves the SPA, portal-backend, the public tools bucket, the
+# dynamically generated plugin routes, AND — in the main_buildout platform
+# deployment — the platform-level service routes (/seek, /jupyterhub, /auth,
+# /airflow, /grafana).
+#
+# NOTE (merge main_buildout <- origin/main): origin/main's portal "newdesign"
+# anticipates a separate platform edge gateway at
+# digitaltwins-platform/services/nginx that would own the platform-level routes
+# and TLS, leaving this file portal-only. That gateway does NOT yet exist in the
+# platform repo (neither main_buildout nor main), so here the portal nginx
+# remains the edge: the /seek … /grafana blocks below are retained from
+# main_buildout. When/if the platform gateway lands, move those blocks there.
+# TLS is terminated by the external reverse proxy in front of the stack, so this
+# template is HTTP-only.
+#
+# Rendered by the official nginx image's entrypoint (envsubst over
+# /etc/nginx/templates/*.template). NGINX_ENVSUBST_FILTER in docker-compose.yml
+# restricts substitution to BACKEND_PORT / MAX_UPLOAD_MB / MAX_PART_SIZE_MB, so
+# the nginx runtime $vars in the platform-route blocks below pass through
+# untouched.
+
 # WebSocket upgrade mapping (shared by all plugin proxies)
 map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      close;
 }
 
-# HTTP -> HTTPS redirect
 server {
-    listen 80;
-    server_name ${PORTAL_BACKEND_HOST};
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    server_name ${PORTAL_BACKEND_HOST};
-
-    # Standard buffer fix for large Keycloak headers
-    proxy_buffer_size 128k;
-    proxy_buffers 4 256k;
-    proxy_busy_buffers_size 256k;
-
-    # SSL certificates (mounted via docker-compose volumes)
-    ssl_certificate /etc/nginx/certs/${PORTAL_BACKEND_HOST}.crt;
-    ssl_certificate_key /etc/nginx/certs/${PORTAL_BACKEND_HOST}.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
+    listen       80;
+    server_name  localhost;
 
     root   /usr/share/nginx/html;
     index  index.html index.htm;
 
-    # SPA Routing Fallback
+    # SPA Routing Fallback. The HTML entry point must never be cached so a
+    # plain browser refresh always picks up the newest content-hashed bundles
+    # after a redeploy (the hashed files under /assets/ keep their long-lived
+    # immutable cache below — their names change every build).
     location / {
         try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache";
     }
 
     # Static File Caching
@@ -39,12 +46,11 @@ server {
         expires 1y;
     }
 
-    # Plugin / workflow / measurement source upload. Measurement DICOM datasets
-    # routinely exceed the original 500m ceiling; MAX_UPLOAD_MB (set via .env)
-    # is the operator-facing dial. Same value is surfaced to the backend
-    # and to the frontend via GET /api/measurement/config so all three layers
-    # agree without coordinated code changes.
+    # Plugin / workflow source upload. Body cap is MAX_UPLOAD_MB (default 20480m).
     # Must precede the generic /api/ block; regex match wins anyway, but order keeps it explicit.
+    # Cap is configurable via MAX_UPLOAD_MB at startup so operators can dial
+    # it up/down without touching code. Same value is surfaced to the backend
+    # and to the frontend via GET /api/measurement/config.
     location ~ ^/api/(tools|workflow|measurement)/upload-source$ {
         proxy_pass http://portal-backend:${BACKEND_PORT};
         proxy_set_header Host $host;
@@ -75,6 +81,20 @@ server {
         proxy_send_timeout 3600s;
     }
 
+    # SSE live build/deploy logs — must NOT be buffered or the terminal
+    # output arrives in one delayed burst instead of streaming.
+    location ~ ^/api/tools/(builds|deploy)/[^/]+/logs/stream$ {
+        proxy_pass http://portal-backend:${BACKEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_set_header Authorization $http_authorization;
+        proxy_buffering off;
+        proxy_cache off;
+        chunked_transfer_encoding off;
+        proxy_read_timeout 86400;
+    }
+
     # Proxy API requests to portal-backend
     location /api/ {
         proxy_pass http://portal-backend:${BACKEND_PORT}/api/;
@@ -102,8 +122,18 @@ server {
         add_header Cache-Control "public, max-age=31536000, immutable";
     }
 
-    # Proxy MinIO Console (management UI) through nginx subpath.
-    # Console knows its public base via MINIO_BROWSER_REDIRECT_URL env.
+    # MinIO Console — DEV-ONLY COPY.
+    #
+    # The authoritative copy lives in the platform repo at
+    # digitaltwins-platform/services/nginx/snippets/platform-routes.conf, where
+    # operators can hand-edit it and `nginx -s reload` without a rebuild. In the
+    # platform stack the gateway matches /minio-console/ first, so requests never
+    # reach this block — it is dead code there.
+    #
+    # It stays here only so the standalone dev stack (which has no gateway) can
+    # still open the Console. To change platform behaviour, edit the gateway copy.
+    #
+    # Console learns its public base from MINIO_BROWSER_REDIRECT_URL.
     location /minio-console/ {
         proxy_pass http://minio:9001/;
         proxy_http_version 1.1;

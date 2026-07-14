@@ -10,7 +10,7 @@ Endpoints implemented here:
 Bucket: ``measurements`` (private, streamed through this backend; never
 direct from MinIO). Staging directory: ``DATASET_DIR_MEASUREMENT`` env, default
 ``./datasets_measurement`` for local dev (Docker compose sets it to
-``/portal_workspace/measurement``).
+``/portal_workspace/measurements``).
 """
 from __future__ import annotations
 
@@ -1047,7 +1047,7 @@ async def get_metadata_json(db: Session = Depends(get_db)):
     consumers, mirroring workflow_router.get_metadata_json. Only completed
     measurements appear here — pending / in-flight / failed ones are kept
     out of the public component listing."""
-    use_ssl = os.getenv("USE_SSL", "false").lower() == "true"
+    use_ssl = os.getenv("SSL", "false").lower() == "true"
     proto = "https" if use_ssl else "http"
     host = os.getenv("PORTAL_BACKEND_HOST", "localhost")
 

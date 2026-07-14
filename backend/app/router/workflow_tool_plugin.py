@@ -1,10 +1,11 @@
+import asyncio
 import os
 import json
 import yaml
 import uvicorn
 import zipfile
 from fastapi import APIRouter, FastAPI, Depends, HTTPException, BackgroundTasks, Request, Query, UploadFile, File
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, PlainTextResponse
 from app.database.database import get_db
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -36,7 +37,6 @@ from pathlib import Path
 from botocore.exceptions import ClientError
 from app.utils.workflow_tool_utils import (
     get_build_record_or_404,
-    get_public_url_for_build,
     get_latest_build_record,
     shuttle_down_deployed_backend)
 from app.utils.builder_utils import (
@@ -46,6 +46,7 @@ from app.utils.builder_utils import (
     read_root_cwl,
     resolve_project_root,
 )
+from app.builder.log_stream import log_registry, bind_thread_job, unbind_thread_job
 from uuid import UUID
 from app.utils.utils import force_rmtree, is_empty
 from fhir_cda import Annotator
@@ -582,6 +583,7 @@ async def get_plugin_deploy(plugin_id: str, background_tasks: BackgroundTasks = 
     db.refresh(db_deploy)
 
     def run_deploy():
+        job_key = f"deploy:{deploy_id}"
         try:
             with SessionLocal() as session:
                 deploy_record = session.query(PluginDeployment).filter(
@@ -589,12 +591,20 @@ async def get_plugin_deploy(plugin_id: str, background_tasks: BackgroundTasks = 
                 if deploy_record:
                     deploy_record.status = DeployStatus.DEPLOYING.value
                     session.commit()
+            log_registry.open(job_key)
+            # Bind this thread so every deploy log record (compose up output AND
+            # the surrounding orchestration steps) streams into the console.
+            bind_thread_job(job_key)
             logger.info("Starting plugin deployment...")
-            result = deployer.deploy(plugin_dict)
+            try:
+                result = deployer.deploy(plugin_dict)
+            finally:
+                unbind_thread_job()
             with SessionLocal() as session:
                 deploy_record = session.query(PluginDeployment).filter(PluginDeployment.deploy_id == deploy_id).first()
                 if deploy_record:
                     if result["success"]:
+                        log_registry.finish(job_key, "completed")
                         deploy_record.status = DeployStatus.COMPLETED.value
                         deploy_record.source_path = result["backend_dir"]
                         deploy_record.up = True
@@ -618,12 +628,14 @@ async def get_plugin_deploy(plugin_id: str, background_tasks: BackgroundTasks = 
                             deployer.reload_nginx()
                             logger.info(f"Nginx config generated for plugin {expose_name}")
                     else:
+                        log_registry.finish(job_key, "failed")
                         deploy_record.status = BuildStatus.FAILED.value
                         deploy_record.error = result["error_message"]
 
                     deploy_record.updated_at = datetime.now()
                     session.commit()
         except Exception as e:
+            log_registry.finish(job_key, "failed")
             logger.error(f"Deploy failed: {e}")
             with SessionLocal() as session:
                 deploy_record = session.query(PluginDeployment).filter(PluginDeployment.deploy_id == deploy_id).first()
@@ -761,39 +773,68 @@ async def get_all_builds(skip: int = 0, limit: int = 100, status: BuildStatus = 
     return builds
 
 
-@router.get("/builds/{build_id}/download-url")
-async def get_build_download_url(build_id: str, db: Session = Depends(get_db)):
-    """Get a presigned download URL for a build's artifacts"""
+async def _sse_log_generator(job_key: str):
+    """Async generator that yields SSE-formatted log lines for the given job key."""
+    offset = 0
+    # First frame: if job doesn't exist (restart/evicted), close immediately
+    # so the frontend falls back to the history endpoint.
+    if not log_registry.exists(job_key):
+        yield "event: end\ndata: gone\n\n"
+        return
+    while True:
+        new_lines, offset, done, status = log_registry.snapshot(job_key, offset)
+        for ln in new_lines:
+            # One SSE data field per log line; strip carriage returns.
+            yield "data: " + ln.replace("\r", "") + "\n\n"
+        if done:
+            yield f"event: end\ndata: {status or 'completed'}\n\n"
+            return
+        await asyncio.sleep(0.25)
 
-    try:
-        build_record = get_build_record_or_404(build_id, db, PluginBuild)
-        url, s3_path = get_public_url_for_build(build_record, "tools")
 
-        return {
-            "build_id": build_id,
-            "download_url": url,
-            "expires_in": None,  # No expiration for public URLs
-            "s3_path": s3_path
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate download url for build {build_id}: {e}")
+def _sse_response(job_key: str) -> StreamingResponse:
+    return StreamingResponse(
+        _sse_log_generator(job_key),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # belt-and-suspenders even if nginx is misconfigured
+            "Connection": "keep-alive",
+        },
+    )
 
 
-@router.get("/builds/{build_id}/direct-url")
-async def get_build_direct_url(build_id: str, db: Session = Depends(get_db)):
-    """Get a direct public URL for a build's artifacts (no expiration)"""
-    try:
-        build_record = get_build_record_or_404(build_id, db, PluginBuild)
-        url, s3_path = get_public_url_for_build(build_record, "tools")
+@router.get("/builds/{build_id}/logs/stream")
+async def stream_build_logs(build_id: str):
+    """SSE endpoint: stream live build logs for a running or recently finished build."""
+    return _sse_response(f"build:{build_id}")
 
-        return {
-            "build_id": build_id,
-            "direct_url": url,
-            "s3_path": s3_path,
-            "note": "This URL has no expiration and is publicly accessible"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate direct url for build {build_id}: {e}")
+
+@router.get("/deploy/{deploy_id}/logs/stream")
+async def stream_deploy_logs(deploy_id: str):
+    """SSE endpoint: stream live deploy logs for a running or recently finished deploy."""
+    return _sse_response(f"deploy:{deploy_id}")
+
+
+@router.get("/builds/{build_id}/logs", response_class=PlainTextResponse)
+async def get_build_logs(build_id: str, db: Session = Depends(get_db)):
+    """Return full build log text. In-memory first (live/recent), DB fallback (completed)."""
+    key = f"build:{build_id}"
+    if log_registry.exists(key):
+        return log_registry.full_text(key)
+    rec = db.query(PluginBuild).filter(PluginBuild.build_id == build_id).first()
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Build not found")
+    return rec.build_logs or ""
+
+
+@router.get("/deploy/{deploy_id}/logs", response_class=PlainTextResponse)
+async def get_deploy_logs(deploy_id: str):
+    """Return full deploy log text (in-memory only — no DB column for deploy logs)."""
+    key = f"deploy:{deploy_id}"
+    if log_registry.exists(key):
+        return log_registry.full_text(key)
+    raise HTTPException(status_code=410, detail="Deploy logs expired (in-memory only)")
 
 
 @router.get("/test-build")
